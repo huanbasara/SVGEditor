@@ -32,3 +32,55 @@ def save_pil_image(pil_image, output_path, filename):
     full_path = os.path.join(output_path, filename)
     pil_image.save(full_path)
     return full_path
+
+def get_prompt(target):
+    files_to_captions = {
+        "apple": "A red apple with green leaves and stems",
+        "bonsai": "A bonsai tree in a pot",
+        "daisy": "A daisy flower",
+        "icecream": "An ice cream cone with three scoops",
+        "lighthouse": "A lighthouse by the sea",
+        "penguin": "A penguin standing on ice",
+    }
+    return files_to_captions[os.path.basename(target)]
+
+def get_edit_prompts(target):
+    # 获取原始prompt
+    original_prompt = get_prompt(target)
+    
+    # 获取编辑提示词
+    files_to_edit_prompts = {
+        "apple": [
+            "remove the leaves",
+            "add more leaves"
+        ],
+        "bonsai": [
+            "make the branches longer",
+            "make the green circles smaller"
+        ],
+        "daisy": [
+            "make the center of the flower smaller",
+            "add more leaves"
+        ],
+        "icecream": [
+            "make the cone longer",
+            "make the scoops smaller"
+        ],
+        "lighthouse": [
+            "lower the sea level",
+            "make the lighthouse wider"
+        ],
+        "penguin": [
+            "make the penguin fatter"
+        ]
+    }
+    
+    # 拼接原始prompt和编辑prompt
+    edit_prompts = files_to_edit_prompts[os.path.basename(target)]
+    combined_prompts = []
+    
+    for edit_prompt in edit_prompts:
+        combined_prompt = f"{original_prompt}, {edit_prompt}"
+        combined_prompts.append(combined_prompt)
+    
+    return combined_prompts
