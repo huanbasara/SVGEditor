@@ -15,15 +15,38 @@ def read_svg_file(svg_path):
         return f.read()
 
 
-def svg_code_to_pil_image(svg_code, width=None, height=None, dpi=300):
-    """将SVG代码转换为PIL Image对象"""
+def svg_code_to_pil_image(svg_code, width=None, height=None, dpi=300, background_color='white'):
+    """将SVG代码转换为PIL Image对象，强制白色背景"""
     png_bytes = cairosvg.svg2png(
         bytestring=svg_code.encode('utf-8'),
         output_width=width,
         output_height=height,
         dpi=dpi
     )
-    return Image.open(io.BytesIO(png_bytes))
+    
+    # 打开图像
+    pil_image = Image.open(io.BytesIO(png_bytes))
+    
+    # 如果是RGBA模式，需要处理透明背景
+    if pil_image.mode in ('RGBA', 'LA'):
+        # 创建指定颜色的背景
+        if background_color == 'white':
+            background = Image.new('RGB', pil_image.size, (255, 255, 255))
+        elif background_color == 'black':
+            background = Image.new('RGB', pil_image.size, (0, 0, 0))
+        else:
+            background = Image.new('RGB', pil_image.size, background_color)
+        
+        # 使用alpha通道合成
+        if pil_image.mode == 'RGBA':
+            background.paste(pil_image, mask=pil_image.split()[-1])
+        else:
+            background.paste(pil_image)
+        
+        return background
+    else:
+        # 如果已经是RGB模式，直接返回
+        return pil_image.convert("RGB")
 
 
 def save_pil_image(pil_image, output_path, filename):
