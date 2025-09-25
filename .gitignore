@@ -171,3 +171,6 @@ Thumbs.db
 
 # Project specific
 docs/
+
+# Backup files with sensitive information
+*_backup.ipynb
