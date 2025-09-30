@@ -179,7 +179,7 @@ class SVGPath:
                     svg_path.path_commands.append(command)
                     # case that the last command is not Z, then add a line to the start position
                     if i == len(path_commands) - 1:
-                        if not command.end_pos.isclose(end_pos):
+                        if add_closing and not command.end_pos.isclose(end_pos):
                             svg_path.path_commands.append(SVGCommandLine(command.end_pos.copy(), end_pos.copy()))
         if svg_path is not None and (allow_empty or svg_path.path_commands):  # SVGPath contains at least one command
             if add_closing:
