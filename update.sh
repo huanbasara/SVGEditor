@@ -4,7 +4,7 @@
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 # 提交信息
-COMMIT_MSG="update@$TIMESTAMP"
+COMMIT_MSG="${1:-"update@$TIMESTAMP"}"
 
 echo "🚀 Starting update process..."
 echo "📝 Commit message: $COMMIT_MSG"
