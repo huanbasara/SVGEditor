@@ -319,18 +319,39 @@ class SVGPathGroup(SVGPrimitive):
         return self
 
     def to_str(self, with_markers=False, coordinate_precision=0, *args, **kwargs):
-        id_attr = f'id="{self.path_id}"'
+        # Generate separate <path> tag for each SVGPath
+        paths = []
         fill_attr = self._get_fill_attr()
         marker_attr = 'marker-start="url(#arrow)"' if with_markers else ''
-        return '<path {} {} {} filling="{}" d="{}"></path>'.format(id_attr, fill_attr, marker_attr, self.path.filling,
-                                                   " ".join(svg_path.to_str(coordinate_precision=coordinate_precision) for svg_path in self.svg_paths))
+        
+        for svg_path in self.svg_paths:
+            id_attr = f'id="{self.path_id}"'
+            filling = svg_path.filling if hasattr(svg_path, 'filling') else 0
+            path_str = '<path {} {} {} filling="{}" d="{}"></path>'.format(
+                id_attr, fill_attr, marker_attr, filling,
+                svg_path.to_str(coordinate_precision=coordinate_precision)
+            )
+            paths.append(path_str)
+        
+        return " ".join(paths)
 
     def to_str_with_desc(self, with_markers=False, *args, **kwargs):
-        id_attr = f'id="{self.path_id}"'
+        # Generate separate <path> tag for each SVGPath with description
+        paths = []
         fill_attr = self._get_fill_attr()
         marker_attr = 'marker-start="url(#arrow)"' if with_markers else ''
         template = '<path {} {} {} filling="{}" d="{}"><desc>{}</desc></path>'
-        return template.format(id_attr, fill_attr, marker_attr, self.path.filling, " ".join(svg_path.to_str() for svg_path in self.svg_paths), self.desc)
+        
+        for svg_path in self.svg_paths:
+            id_attr = f'id="{self.path_id}"'
+            filling = svg_path.filling if hasattr(svg_path, 'filling') else 0
+            path_str = template.format(
+                id_attr, fill_attr, marker_attr, filling,
+                svg_path.to_str(), self.desc
+            )
+            paths.append(path_str)
+        
+        return " ".join(paths)
 
     def to_tensor(self, PAD_VAL=-1):
         return torch.cat([p.to_tensor(PAD_VAL=PAD_VAL) for p in self.svg_paths], dim=0)
