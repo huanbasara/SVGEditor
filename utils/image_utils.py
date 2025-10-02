@@ -293,16 +293,25 @@ def adaptive_local_thinning(binary_img, erosion_strength=1, thin_threshold=3):
     print(f"Processing {num_labels - 1} connected components...")
     print(f"Erosion strength: {erosion_strength}px, Thin threshold: {thin_threshold}px")
     
+    preserved_count = 0
+    eroded_count = 0
+    
     for i in range(1, num_labels):
         # Extract this component
         component_mask = (labels == i).astype(np.uint8) * 255
         
         # Apply gentle local thinning
-        thinned_component = thin_component_gently(component_mask, erosion_strength, thin_threshold)
+        thinned_component, was_eroded = thin_component_gently(component_mask, erosion_strength, thin_threshold)
+        
+        if was_eroded:
+            eroded_count += 1
+        else:
+            preserved_count += 1
         
         # Add to result
         result = cv2.bitwise_or(result, thinned_component)
     
+    print(f"Preserved {preserved_count} thin components, eroded {eroded_count} thick components")
     print(f"White pixels: {cv2.countNonZero(binary_img)} → {cv2.countNonZero(result)}")
     
     return result
@@ -327,7 +336,7 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
         thin_threshold: Thickness threshold (if max radius < this, preserve)
     
     Returns:
-        Gently thinned component
+        (thinned_component, was_eroded): Tuple of result and whether erosion happened
     """
     # Distance transform: each pixel's distance to nearest edge
     dist_transform = cv2.distanceTransform(component, cv2.DIST_L2, 5)
@@ -337,22 +346,22 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
     
     # If entire component is thin, preserve it
     if max_radius < thin_threshold:
-        return component
+        return component, False
     
     # Component is thick, erode it by removing outer pixels
     # Keep only pixels that are > erosion_strength away from edge
     # This removes erosion_strength pixels from the boundary
     result = (dist_transform > erosion_strength).astype(np.uint8) * 255
     
-    # Safety check: if result is empty or too small, return original
-    original_pixels = cv2.countNonZero(component)
+    # Safety check: if result is empty, return original
     result_pixels = cv2.countNonZero(result)
     
-    if result_pixels < 10 or result_pixels < original_pixels * 0.1:
-        # Too aggressive, would destroy the component
-        return component
+    if result_pixels < 5:
+        # Would completely destroy the component, preserve original
+        return component, False
     
-    return result
+    # Successfully eroded
+    return result, True
 
 
 def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=True):
