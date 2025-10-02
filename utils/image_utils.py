@@ -295,13 +295,16 @@ def adaptive_local_thinning(binary_img, erosion_strength=1, thin_threshold=3):
     
     preserved_count = 0
     eroded_count = 0
+    max_radii = []
     
     for i in range(1, num_labels):
         # Extract this component
         component_mask = (labels == i).astype(np.uint8) * 255
         
         # Apply gentle local thinning
-        thinned_component, was_eroded = thin_component_gently(component_mask, erosion_strength, thin_threshold)
+        thinned_component, was_eroded, max_radius = thin_component_gently(component_mask, erosion_strength, thin_threshold)
+        
+        max_radii.append(max_radius)
         
         if was_eroded:
             eroded_count += 1
@@ -310,6 +313,12 @@ def adaptive_local_thinning(binary_img, erosion_strength=1, thin_threshold=3):
         
         # Add to result
         result = cv2.bitwise_or(result, thinned_component)
+    
+    # Show radius distribution
+    if max_radii:
+        max_radii_sorted = sorted(max_radii, reverse=True)
+        print(f"Top 10 component max radii: {[f'{r:.1f}' for r in max_radii_sorted[:10]]}")
+        print(f"Min radius: {min(max_radii):.1f}, Max radius: {max(max_radii):.1f}")
     
     print(f"Preserved {preserved_count} thin components, eroded {eroded_count} thick components")
     print(f"White pixels: {cv2.countNonZero(binary_img)} → {cv2.countNonZero(result)}")
@@ -336,7 +345,7 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
         thin_threshold: Thickness threshold (if max radius < this, preserve)
     
     Returns:
-        (thinned_component, was_eroded): Tuple of result and whether erosion happened
+        (thinned_component, was_eroded, max_radius): Tuple of result, erosion status, and max radius
     """
     # Distance transform: each pixel's distance to nearest edge
     dist_transform = cv2.distanceTransform(component, cv2.DIST_L2, 5)
@@ -346,7 +355,7 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
     
     # If entire component is thin, preserve it
     if max_radius < thin_threshold:
-        return component, False
+        return component, False, max_radius
     
     # Component is thick, erode it by removing outer pixels
     # Keep only pixels that are > erosion_strength away from edge
@@ -358,10 +367,10 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
     
     if result_pixels < 5:
         # Would completely destroy the component, preserve original
-        return component, False
+        return component, False, max_radius
     
     # Successfully eroded
-    return result, True
+    return result, True, max_radius
 
 
 def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=True):
