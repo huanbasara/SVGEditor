@@ -175,7 +175,7 @@ def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=T
     return result
 
 
-def smart_line_thinning(binary_img, target_width=2):
+def smart_line_thinning(binary_img, target_width=2, preserve_threshold=0.5):
     """
     Smart line thinning using distance transform and skeleton.
     
@@ -187,7 +187,9 @@ def smart_line_thinning(binary_img, target_width=2):
     
     Args:
         binary_img: Binary image (white lines on black background)
-        target_width: Target line width in pixels
+        target_width: Target line width in pixels (larger = less aggressive thinning)
+        preserve_threshold: Threshold ratio for preserving original thickness
+                          (0.0-1.0, higher = preserve more original lines)
     
     Returns:
         Thinned binary image with more uniform thickness
@@ -206,19 +208,24 @@ def smart_line_thinning(binary_img, target_width=2):
     # Dilate skeleton to target width
     uniform_lines = cv2.dilate(skeleton, kernel, iterations=1)
     
-    # Identify originally thin lines (max distance < target_width / 2)
+    # Identify originally thin lines (max distance < threshold)
     # For these areas, preserve original
     thin_mask = np.zeros_like(binary_img, dtype=bool)
     
     # Get connected components of original image
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
     
+    # Calculate threshold based on preserve_threshold parameter
+    # preserve_threshold: 0.5 means preserve lines with max_dist < target_width/2
+    # preserve_threshold: 1.0 means preserve lines with max_dist < target_width
+    thickness_threshold = target_width * preserve_threshold
+    
     for i in range(1, num_labels):
         component_mask = (labels == i)
         max_dist = np.max(dist_transform[component_mask])
         
-        # If max distance < target_width/2, this is a thin line
-        if max_dist < half_width:
+        # If max distance < thickness_threshold, preserve original
+        if max_dist < thickness_threshold:
             thin_mask[component_mask] = True
     
     # Combine: use uniform width for thick lines, preserve original for thin lines
