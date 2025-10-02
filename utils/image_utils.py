@@ -312,16 +312,19 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
     """
     Gently thin a component: only erode thick areas, preserve thin areas.
     
+    Key insight: Distance transform = distance to nearest edge
+    - Large value = thick area (far from edge)
+    - Small value = thin area (close to edge)
+    
     Strategy:
-    1. Distance transform → measure local thickness
-    2. For each pixel:
-       - If local thickness < thin_threshold → keep original
-       - If local thickness >= thin_threshold → erode by erosion_strength
+    1. Compute distance transform (each pixel's distance to edge)
+    2. If max_distance < thin_threshold → preserve entire component (it's thin)
+    3. If max_distance >= thin_threshold → erode by removing outer layers
     
     Args:
         component: Single component mask
-        erosion_strength: Erosion amount for thick areas (pixels)
-        thin_threshold: Thickness threshold (pixels)
+        erosion_strength: How many pixels to erode (remove from edges)
+        thin_threshold: Thickness threshold (if max radius < this, preserve)
     
     Returns:
         Gently thinned component
@@ -329,40 +332,24 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
     # Distance transform: each pixel's distance to nearest edge
     dist_transform = cv2.distanceTransform(component, cv2.DIST_L2, 5)
     
-    max_dist = dist_transform.max()
+    # Max distance = "radius" of thickest part
+    max_radius = dist_transform.max()
     
-    if max_dist < thin_threshold:
-        # Entire component is thin, preserve as-is
+    # If entire component is thin, preserve it
+    if max_radius < thin_threshold:
         return component
     
-    # Create result by selectively keeping pixels
-    # Keep pixels where: distance > erosion_strength OR local thickness < thin_threshold
+    # Component is thick, erode it by removing outer pixels
+    # Keep only pixels that are > erosion_strength away from edge
+    # This removes erosion_strength pixels from the boundary
+    result = (dist_transform > erosion_strength).astype(np.uint8) * 255
     
-    # Method: Only keep pixels that are erosion_strength away from edge,
-    #         but preserve areas where max local thickness < thin_threshold
-    
-    result = np.zeros_like(component)
-    
-    # For each pixel, check local thickness in a small neighborhood
-    kernel_size = 5
-    kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size * kernel_size)
-    
-    # Local max thickness (dilate distance transform to get neighborhood max)
-    local_max_thickness = cv2.dilate(dist_transform, np.ones((kernel_size, kernel_size)))
-    
-    # Decision mask:
-    # - Keep pixel if it's > erosion_strength from edge (for thick areas)
-    # - OR if local area is thin (max thickness < thin_threshold)
-    keep_mask = ((dist_transform > erosion_strength) | (local_max_thickness < thin_threshold)).astype(np.uint8) * 255
-    
-    result = cv2.bitwise_and(component, keep_mask)
-    
-    # Safety check: if too much eroded, return original
+    # Safety check: if result is empty or too small, return original
     original_pixels = cv2.countNonZero(component)
     result_pixels = cv2.countNonZero(result)
     
-    if result_pixels < original_pixels * 0.5:
-        # Lost more than 50%, too aggressive, return original
+    if result_pixels < 10 or result_pixels < original_pixels * 0.1:
+        # Too aggressive, would destroy the component
         return component
     
     return result
