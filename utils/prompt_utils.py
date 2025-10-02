@@ -14,24 +14,38 @@ def get_prompt(target):
         "lighthouse": "Lower the sea level",
         "penguin": "Make the penguin fatter",
         "153_B": (
-            "Transform this girl's long ponytail into a short bob haircut. "
-            "Make the hair end at chin level, remove all the long flowing hair. "
-            "Keep everything else identical: same pose, same pointing gesture, "
-            "same facial expression, same outfit."
+            "Transform this girl's long ponytail into a chic, shoulder-length layered cut. "
+            "Remove all long flowing hair. "
+            "Ensure clean, continuous lines without artifacts."
         ),
     }
     
     edit_instruction = edit_instructions[target_name]
     
-    # Optimized template for SVG-friendly editing
+    # Updated style requirements
     style_requirements = (
         "Maintain the exact same minimalist black line art style on pure white background. "
-        "Keep all unmodified parts unchanged. "
-        "Use uniform black lines with consistent thickness throughout the entire image. "
-        "Ensure all lines are clear, sharp, and of the same color depth. "
-        "Avoid any variations in line weight or opacity."
+        "Convert all lines to uniform deep black color with consistent thickness. "
+        "Keep all unmodified parts with their original line structure, position, and curvature. "
+        "Ensure all lines are clear, smooth, and of the same color depth and weight. "
+        "Avoid any variations in line weight or opacity within the new image."
     )
     
     prompt = f"{edit_instruction} {style_requirements}"
     
     return prompt
+
+
+def get_negative_prompt():
+    """Generate negative prompt for consistent line art quality"""
+    return (
+        "inconsistent line thickness, varying line weight, "
+        "gradient lines, non-uniform line opacity, "
+        "thick and thin lines mixed, uneven line density, "
+        "color variations in lines, non-black lines, "
+        "colored lines, gradient effects, "
+        "white background noise, speckles, dots, "
+        "artifacts, jagged edges, broken lines, "
+        "discontinuous lines, blurry lines, "
+        "low quality, distorted, messy"
+    )
