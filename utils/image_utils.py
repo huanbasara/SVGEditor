@@ -376,6 +376,11 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
         # Would completely destroy the component, preserve original
         return component, False, max_radius
     
+    # Structural integrity check: verify skeleton is preserved
+    if not is_structure_preserved(component, result):
+        # Erosion damaged structure, return original
+        return component, False, max_radius
+    
     # Successfully eroded
     return result, True, max_radius
 
