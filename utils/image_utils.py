@@ -269,33 +269,36 @@ def count_skeleton_endpoints(skeleton):
     return endpoints
 
 
-def adaptive_local_thinning(binary_img, target_thickness=2):
+def adaptive_local_thinning(binary_img, erosion_strength=1, thin_threshold=3):
     """
-    Adaptive local thinning: erode thick parts, preserve thin parts WITHIN each component.
+    Adaptive local thinning: gently erode thick parts, preserve thin parts.
     
-    Uses distance transform to detect local thickness, then applies selective erosion
-    based on thickness at each pixel location.
+    Uses distance transform to detect local thickness:
+    - Thin areas (width < thin_threshold): preserve original
+    - Thick areas (width >= thin_threshold): erode by erosion_strength pixels
     
     Args:
         binary_img: Binary image (white lines on black background)
-        target_thickness: Target thickness for thin parts (pixels)
+        erosion_strength: How many pixels to erode from thick areas (1-2 recommended)
+        thin_threshold: Thickness threshold to distinguish thin from thick (pixels)
     
     Returns:
-        Locally thinned binary image
+        Gently thinned binary image
     """
     # Get all connected components
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
     
     result = np.zeros_like(binary_img)
     
-    print(f"Processing {num_labels - 1} connected components with local adaptive thinning...")
+    print(f"Processing {num_labels - 1} connected components...")
+    print(f"Erosion strength: {erosion_strength}px, Thin threshold: {thin_threshold}px")
     
     for i in range(1, num_labels):
         # Extract this component
         component_mask = (labels == i).astype(np.uint8) * 255
         
-        # Apply local adaptive thinning to this component
-        thinned_component = thin_component_locally(component_mask, target_thickness)
+        # Apply gentle local thinning
+        thinned_component = thin_component_gently(component_mask, erosion_strength, thin_threshold)
         
         # Add to result
         result = cv2.bitwise_or(result, thinned_component)
@@ -305,42 +308,62 @@ def adaptive_local_thinning(binary_img, target_thickness=2):
     return result
 
 
-def thin_component_locally(component, target_thickness):
+def thin_component_gently(component, erosion_strength, thin_threshold):
     """
-    Thin a single component based on local thickness.
+    Gently thin a component: only erode thick areas, preserve thin areas.
     
     Strategy:
-    1. Distance transform → get thickness at each pixel
-    2. Thin parts (distance < target): keep original
-    3. Thick parts (distance >= target): erode to target thickness
+    1. Distance transform → measure local thickness
+    2. For each pixel:
+       - If local thickness < thin_threshold → keep original
+       - If local thickness >= thin_threshold → erode by erosion_strength
     
     Args:
         component: Single component mask
-        target_thickness: Target thickness (pixels)
+        erosion_strength: Erosion amount for thick areas (pixels)
+        thin_threshold: Thickness threshold (pixels)
     
     Returns:
-        Locally thinned component
+        Gently thinned component
     """
-    # Distance transform: each pixel's value = distance to nearest background
+    # Distance transform: each pixel's distance to nearest edge
     dist_transform = cv2.distanceTransform(component, cv2.DIST_L2, 5)
     
     max_dist = dist_transform.max()
     
-    if max_dist <= target_thickness:
-        # Already thin enough
+    if max_dist < thin_threshold:
+        # Entire component is thin, preserve as-is
         return component
     
-    # Extract skeleton (1-pixel wide centerline)
-    skeleton = cv2.ximgproc.thinning(component)
+    # Create result by selectively keeping pixels
+    # Keep pixels where: distance > erosion_strength OR local thickness < thin_threshold
     
-    # Dilate skeleton to target thickness
-    # This ensures uniform thickness everywhere
-    kernel_size = int(target_thickness * 2 + 1)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    dilated_skeleton = cv2.dilate(skeleton, kernel)
+    # Method: Only keep pixels that are erosion_strength away from edge,
+    #         but preserve areas where max local thickness < thin_threshold
     
-    # Only keep pixels that exist in original component
-    result = cv2.bitwise_and(dilated_skeleton, component)
+    result = np.zeros_like(component)
+    
+    # For each pixel, check local thickness in a small neighborhood
+    kernel_size = 5
+    kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size * kernel_size)
+    
+    # Local max thickness (dilate distance transform to get neighborhood max)
+    local_max_thickness = cv2.dilate(dist_transform, np.ones((kernel_size, kernel_size)))
+    
+    # Decision mask:
+    # - Keep pixel if it's > erosion_strength from edge (for thick areas)
+    # - OR if local area is thin (max thickness < thin_threshold)
+    keep_mask = ((dist_transform > erosion_strength) | (local_max_thickness < thin_threshold)).astype(np.uint8) * 255
+    
+    result = cv2.bitwise_and(component, keep_mask)
+    
+    # Safety check: if too much eroded, return original
+    original_pixels = cv2.countNonZero(component)
+    result_pixels = cv2.countNonZero(result)
+    
+    if result_pixels < original_pixels * 0.5:
+        # Lost more than 50%, too aggressive, return original
+        return component
     
     return result
 
