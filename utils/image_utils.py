@@ -269,6 +269,82 @@ def count_skeleton_endpoints(skeleton):
     return endpoints
 
 
+def adaptive_local_thinning(binary_img, target_thickness=2):
+    """
+    Adaptive local thinning: erode thick parts, preserve thin parts WITHIN each component.
+    
+    Uses distance transform to detect local thickness, then applies selective erosion
+    based on thickness at each pixel location.
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+        target_thickness: Target thickness for thin parts (pixels)
+    
+    Returns:
+        Locally thinned binary image
+    """
+    # Get all connected components
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
+    
+    result = np.zeros_like(binary_img)
+    
+    print(f"Processing {num_labels - 1} connected components with local adaptive thinning...")
+    
+    for i in range(1, num_labels):
+        # Extract this component
+        component_mask = (labels == i).astype(np.uint8) * 255
+        
+        # Apply local adaptive thinning to this component
+        thinned_component = thin_component_locally(component_mask, target_thickness)
+        
+        # Add to result
+        result = cv2.bitwise_or(result, thinned_component)
+    
+    print(f"White pixels: {cv2.countNonZero(binary_img)} → {cv2.countNonZero(result)}")
+    
+    return result
+
+
+def thin_component_locally(component, target_thickness):
+    """
+    Thin a single component based on local thickness.
+    
+    Strategy:
+    1. Distance transform → get thickness at each pixel
+    2. Thin parts (distance < target): keep original
+    3. Thick parts (distance >= target): erode to target thickness
+    
+    Args:
+        component: Single component mask
+        target_thickness: Target thickness (pixels)
+    
+    Returns:
+        Locally thinned component
+    """
+    # Distance transform: each pixel's value = distance to nearest background
+    dist_transform = cv2.distanceTransform(component, cv2.DIST_L2, 5)
+    
+    max_dist = dist_transform.max()
+    
+    if max_dist <= target_thickness:
+        # Already thin enough
+        return component
+    
+    # Extract skeleton (1-pixel wide centerline)
+    skeleton = cv2.ximgproc.thinning(component)
+    
+    # Dilate skeleton to target thickness
+    # This ensures uniform thickness everywhere
+    kernel_size = int(target_thickness * 2 + 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    dilated_skeleton = cv2.dilate(skeleton, kernel)
+    
+    # Only keep pixels that exist in original component
+    result = cv2.bitwise_and(dilated_skeleton, component)
+    
+    return result
+
+
 def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=True):
     """
     Adaptively thin lines: reduce thickness of thick lines while preserving thin lines.
