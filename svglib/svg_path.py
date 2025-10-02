@@ -888,13 +888,14 @@ class SVGPath:
         line = np.array([self.start_pos.pos, *(cmd.end_pos.pos for cmd in self.path_commands)])
         return np.concatenate([np.array(control).reshape(-1, 2), line], axis=0)
 
-    def smooth_open(self):
+    def smooth_open(self, tension=0.5):
         """
-        Smooth open paths (skeleton lines) using a modified Thomas algorithm
-        with stable boundary conditions. Only adjusts control points, keeps
-        anchor points unchanged.
+        Smooth open paths (skeleton lines) using local tangent estimation.
+        Only adjusts control points, keeps anchor points unchanged.
+        This method is stable for short, fragmented skeleton paths.
         
-        This version fixes the endpoint "ray artifact" issue in the original smooth().
+        Args:
+            tension: Control smoothness (0.0=straight, 0.5=moderate, 1.0=very smooth)
         
         Returns:
             self
@@ -908,53 +909,43 @@ class SVGPath:
         # Extract knots (anchor points - these never change!)
         knots = [self.start_pos] + [cmd.end_pos for cmd in self.path_commands]
         
-        # Special case: single segment
-        if n == 1:
-            p1, p2 = knots[0], knots[1]
-            c1 = p1 + (p2 - p1) * 0.333
-            c2 = p1 + (p2 - p1) * 0.667
-            self.path_commands[0] = SVGCommandBezier(p1, c1, c2, p2)
-            return self
+        # Calculate control points based on local tangent directions
+        new_commands = []
         
-        # Modified Thomas algorithm with stable open-path boundary conditions
-        r = [Point(0.)] * n
-        f = [0.] * n
-        p = [Point(0.)] * (n + 1)
-        
-        # First equation: natural boundary (zero curvature at start)
-        # 2*p[0] = knots[0] + knots[1]
-        f[0] = 2.0
-        r[0] = knots[0] + knots[1]
-        
-        # Interior equations: standard continuity
-        for i in range(1, n - 1):
-            a = 1.0
-            b = 4.0
-            m = a / f[i - 1]
-            f[i] = b - m
-            r[i] = 4.0 * knots[i] + 2.0 * knots[i + 1] - m * r[i - 1]
-        
-        # Last equation: natural boundary (zero curvature at end)
-        # 2*p[n-1] + p[n] = 3*knots[n]
-        a = 1.0
-        b = 2.0
-        m = a / f[n - 2]
-        f[n - 1] = b - m
-        r[n - 1] = 3.0 * knots[n - 1] + knots[n] - m * r[n - 2]
-        
-        # Back substitution
-        p[n - 1] = r[n - 1] / f[n - 1]
-        for i in range(n - 2, -1, -1):
-            p[i] = (r[i] - p[i + 1]) / f[i]
-        
-        # Calculate last control point with stable formula
-        p[n] = knots[n] + (knots[n] - p[n - 1])
-        
-        # Build bezier commands
         for i in range(n):
-            p1, p2 = knots[i], knots[i + 1]
-            c1 = p[i]
-            c2 = 2.0 * p2 - p[i + 1]
-            self.path_commands[i] = SVGCommandBezier(p1, c1, c2, p2)
+            p0 = knots[i]      # Current segment start
+            p1 = knots[i + 1]  # Current segment end
+            segment_len = p0.dist(p1)
+            
+            # Estimate tangent at p0 (start point)
+            if i == 0:
+                # First segment: use forward direction
+                tangent_in = (p1 - p0).normalize()
+            else:
+                # Use weighted average of incoming and outgoing directions
+                p_prev = knots[i - 1]
+                dir_in = (p0 - p_prev).normalize()
+                dir_out = (p1 - p0).normalize()
+                tangent_in = (dir_in + dir_out).normalize()
+            
+            # Estimate tangent at p1 (end point)
+            if i == n - 1:
+                # Last segment: use backward direction
+                tangent_out = (p1 - p0).normalize()
+            else:
+                # Use weighted average of incoming and outgoing directions
+                p_next = knots[i + 2]
+                dir_in = (p1 - p0).normalize()
+                dir_out = (p_next - p1).normalize()
+                tangent_out = (dir_in + dir_out).normalize()
+            
+            # Place control points along tangent directions
+            # Standard bezier: control points at 1/3 distance
+            control_dist = segment_len * 0.333 * tension
+            c1 = p0 + tangent_in * control_dist
+            c2 = p1 - tangent_out * control_dist
+            
+            new_commands.append(SVGCommandBezier(p0, c1, c2, p1))
         
+        self.path_commands = new_commands
         return self
