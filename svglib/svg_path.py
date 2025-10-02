@@ -427,18 +427,66 @@ class SVGPath:
 
         return self
 
-    def smooth_clamped(self, max_ratio=3.0):
+    def smooth_chaikin(self, iterations=1):
         """
-        Smooth bezier curves with control point clamping to prevent ray artifacts.
+        Smooth bezier curves using Chaikin's corner cutting algorithm.
+        This is specifically designed for polylines and skeleton paths.
         
         Args:
-            max_ratio: Maximum allowed ratio of control point distance to segment length (default: 3.0)
+            iterations: Number of smoothing iterations (1-3 recommended)
+        
+        Returns:
+            self
+        """
+        from .svg_command import SVGCommandBezier
+        
+        for _ in range(iterations):
+            n = len(self.path_commands)
+            if n < 2:
+                return self
+            
+            # Extract knots (endpoints of each segment)
+            knots = [self.start_pos] + [cmd.end_pos for cmd in self.path_commands]
+            
+            # Chaikin's algorithm: for each segment, create two new points at 25% and 75%
+            new_knots = [knots[0]]  # Keep first point
+            
+            for i in range(len(knots) - 1):
+                p0, p1 = knots[i], knots[i + 1]
+                # Q point at 25% of the segment
+                q = p0 + (p1 - p0) * 0.25
+                # R point at 75% of the segment
+                r = p0 + (p1 - p0) * 0.75
+                new_knots.extend([q, r])
+            
+            new_knots.append(knots[-1])  # Keep last point
+            
+            # Convert back to Bezier commands
+            new_commands = []
+            for i in range(len(new_knots) - 1):
+                p1, p2 = new_knots[i], new_knots[i + 1]
+                # Place control points at 1/3 and 2/3 (standard for line-to-bezier)
+                c1 = p1 + (p2 - p1) * 0.333
+                c2 = p1 + (p2 - p1) * 0.667
+                new_commands.append(SVGCommandBezier(p1, c1, c2, p2))
+            
+            self.path_commands = new_commands
+        
+        return self
+
+    def smooth_clamped(self, max_ratio=1.0):
+        """
+        Smooth bezier curves with aggressive control point clamping to prevent ray artifacts.
+        
+        Args:
+            max_ratio: Maximum allowed ratio of control point distance to segment length (default: 1.0)
         
         Returns:
             self
         """
         n = len(self.path_commands)
         knots = [self.start_pos, *(path_commmand.end_pos for path_commmand in self.path_commands)]
+        
         r = [knots[0] + 2 * knots[1]]
         f = [2]
         p = [Point(0.)] * (n + 1)
@@ -460,14 +508,16 @@ class SVGPath:
             p[i] = (r[i] - p[i+1]) / f[i]
         p[n] = (3 * knots[n] - p[n-1]) / 2
 
+        # Apply smoothing with aggressive clamping for ALL segments
         for i in range(n):
             p1, p2 = knots[i], knots[i+1]
             c1, c2 = p[i], 2 * p2 - p[i+1]
             
-            # Clamp control points to prevent ray artifacts
             segment_length = p1.dist(p2)
-            if segment_length > 0:
-                max_control_dist = segment_length * max_ratio
+            
+            # Always apply clamping
+            if segment_length > 0.01:  # Avoid division by zero
+                max_control_dist = max(segment_length * max_ratio, 0.5)  # At least 0.5px
                 
                 # Clamp c1
                 d1 = p1.dist(c1)
@@ -478,6 +528,10 @@ class SVGPath:
                 d2 = p2.dist(c2)
                 if d2 > max_control_dist:
                     c2 = p2 + (c2 - p2) * (max_control_dist / d2)
+            else:
+                # For extremely short segments, put control points on the line
+                c1 = p1 + (p2 - p1) * 0.333
+                c2 = p1 + (p2 - p1) * 0.667
             
             self.path_commands[i] = SVGCommandBezier(p1, c1, c2, p2)
 
