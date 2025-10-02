@@ -129,6 +129,95 @@ def count_connected_components(binary_img):
     return num_labels - 1  # Subtract background
 
 
+def gentle_line_thinning(binary_img, erosion_iterations=1, dilation_iterations=0):
+    """
+    Gentle line thinning using erosion (and optional dilation).
+    
+    This method does simple morphological operations without skeleton extraction.
+    Suitable for: making thick lines slightly thinner while keeping fills as fills.
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+        erosion_iterations: Number of erosion iterations (1-2 recommended)
+        dilation_iterations: Number of dilation iterations after erosion (0 = no dilation)
+    
+    Returns:
+        Thinned binary image
+    """
+    result = binary_img.copy()
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    
+    # Erosion: make lines thinner
+    if erosion_iterations > 0:
+        result = cv2.erode(result, kernel, iterations=erosion_iterations)
+        print(f"Applied {erosion_iterations} erosion iteration(s)")
+        print(f"White pixels after erosion: {cv2.countNonZero(result)}")
+    
+    # Dilation: expand lines back slightly (optional)
+    if dilation_iterations > 0:
+        result = cv2.dilate(result, kernel, iterations=dilation_iterations)
+        print(f"Applied {dilation_iterations} dilation iteration(s)")
+        print(f"White pixels after dilation: {cv2.countNonZero(result)}")
+    
+    return result
+
+
+def selective_line_thinning(binary_img, erosion_iterations=1):
+    """
+    Selective line thinning: erode thick lines, preserve thin lines that would break.
+    
+    This method processes each connected component individually:
+    - If erosion would break the component, keep it original
+    - Otherwise, apply erosion to make it thinner
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+        erosion_iterations: Number of erosion iterations to try (1-2 recommended)
+    
+    Returns:
+        Selectively thinned binary image
+    """
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    
+    # Get all connected components
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
+    
+    result = np.zeros_like(binary_img)
+    preserved_count = 0
+    eroded_count = 0
+    
+    print(f"Processing {num_labels - 1} connected components...")
+    
+    for i in range(1, num_labels):
+        # Extract this component
+        component_mask = (labels == i).astype(np.uint8) * 255
+        
+        # Try eroding this component
+        eroded_component = cv2.erode(component_mask, kernel, iterations=erosion_iterations)
+        
+        # Check if erosion breaks this component (increases component count or loses too much)
+        original_count = count_connected_components(component_mask)
+        eroded_count_check = count_connected_components(eroded_component)
+        
+        original_pixels = cv2.countNonZero(component_mask)
+        eroded_pixels = cv2.countNonZero(eroded_component)
+        
+        # Decide: preserve or erode?
+        if eroded_count_check > original_count or eroded_pixels < original_pixels * 0.3:
+            # Erosion would break this component or lose too much → preserve original
+            result = cv2.bitwise_or(result, component_mask)
+            preserved_count += 1
+        else:
+            # Safe to erode → use eroded version
+            result = cv2.bitwise_or(result, eroded_component)
+            eroded_count += 1
+    
+    print(f"Preserved {preserved_count} thin components, eroded {eroded_count} thick components")
+    print(f"White pixels: {cv2.countNonZero(binary_img)} → {cv2.countNonZero(result)}")
+    
+    return result
+
+
 def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=True):
     """
     Adaptively thin lines: reduce thickness of thick lines while preserving thin lines.
