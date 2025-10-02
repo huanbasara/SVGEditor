@@ -78,6 +78,121 @@ import cv2
 import numpy as np
 
 
+def uniform_line_thickness(binary_img, target_thickness=2, tolerance=0.5):
+    """
+    Make all lines uniform thickness: erode thick lines, dilate thin lines.
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+        target_thickness: Target radius for all lines (pixels)
+        tolerance: Tolerance range (lines within ±tolerance are left unchanged)
+    
+    Returns:
+        Uniformly thinned/thickened binary image
+    """
+    # Get all connected components
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
+    
+    result = np.zeros_like(binary_img)
+    
+    print(f"Processing {num_labels - 1} connected components...")
+    print(f"Target thickness: {target_thickness}px, Tolerance: ±{tolerance}px")
+    
+    eroded_count = 0
+    dilated_count = 0
+    unchanged_count = 0
+    
+    for i in range(1, num_labels):
+        # Extract this component
+        component_mask = (labels == i).astype(np.uint8) * 255
+        
+        # Measure current thickness
+        dist_transform = cv2.distanceTransform(component_mask, cv2.DIST_L2, 5)
+        max_radius = dist_transform.max()
+        
+        # Determine action
+        if max_radius > target_thickness + tolerance:
+            # Too thick → erode
+            processed, success = erode_component_safely(component_mask, max_radius, target_thickness)
+            if success:
+                eroded_count += 1
+            else:
+                unchanged_count += 1
+        elif max_radius < target_thickness - tolerance:
+            # Too thin → dilate
+            processed, success = dilate_component_safely(component_mask, max_radius, target_thickness)
+            if success:
+                dilated_count += 1
+            else:
+                unchanged_count += 1
+        else:
+            # Within tolerance → keep original
+            processed = component_mask
+            unchanged_count += 1
+        
+        # Add to result
+        result = cv2.bitwise_or(result, processed)
+    
+    print(f"Eroded {eroded_count}, Dilated {dilated_count}, Unchanged {unchanged_count}")
+    print(f"White pixels: {cv2.countNonZero(binary_img)} → {cv2.countNonZero(result)}")
+    
+    return result
+
+
+def erode_component_safely(component, current_radius, target_radius):
+    """
+    Erode component to target radius with structural integrity check.
+    
+    Returns:
+        (processed_component, success)
+    """
+    # Calculate erosion amount
+    erosion_amount = int(round(current_radius - target_radius))
+    erosion_amount = max(1, erosion_amount)  # At least 1
+    
+    # Erode
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    eroded = cv2.erode(component, kernel, iterations=erosion_amount)
+    
+    # Check structural integrity
+    if cv2.countNonZero(eroded) < 5:
+        return component, False
+    
+    if not is_structure_preserved(component, eroded):
+        return component, False
+    
+    return eroded, True
+
+
+def dilate_component_safely(component, current_radius, target_radius):
+    """
+    Dilate component to target radius with structural integrity check.
+    
+    Returns:
+        (processed_component, success)
+    """
+    # Calculate dilation amount
+    dilation_amount = int(round(target_radius - current_radius))
+    dilation_amount = max(1, min(dilation_amount, 2))  # Cap at 2 to avoid over-dilation
+    
+    # Dilate
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    dilated = cv2.dilate(component, kernel, iterations=dilation_amount)
+    
+    # For dilation, we mainly check if it's not too aggressive
+    original_pixels = cv2.countNonZero(component)
+    dilated_pixels = cv2.countNonZero(dilated)
+    
+    if dilated_pixels > original_pixels * 3:
+        # Too aggressive, use less dilation
+        return cv2.dilate(component, kernel, iterations=1), True
+    
+    return dilated, True
+
+
+
+
+
 def get_skeleton(binary_img):
     """
     Extract skeleton (centerline) of binary image using morphological thinning.
