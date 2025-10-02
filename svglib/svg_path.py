@@ -427,18 +427,25 @@ class SVGPath:
 
         return self
 
-    def smooth_chaikin(self, iterations=1):
+    def smooth_chaikin(self, iterations=1, ratio=0.25):
         """
         Smooth bezier curves using Chaikin's corner cutting algorithm.
         This is specifically designed for polylines and skeleton paths.
         
         Args:
             iterations: Number of smoothing iterations (1-3 recommended)
+            ratio: Corner cutting ratio (0.25=standard, 0.33=gentle, 0.4=very gentle)
+                   - 0.25: Standard Chaikin (cuts at 25% and 75%)
+                   - 0.33: Gentler smoothing (cuts at 33% and 67%)
+                   - 0.4:  Very gentle (cuts at 40% and 60%)
         
         Returns:
             self
         """
         from .svg_command import SVGCommandBezier
+        
+        # Clamp ratio to reasonable range
+        ratio = max(0.1, min(0.49, ratio))
         
         for _ in range(iterations):
             n = len(self.path_commands)
@@ -448,15 +455,15 @@ class SVGPath:
             # Extract knots (endpoints of each segment)
             knots = [self.start_pos] + [cmd.end_pos for cmd in self.path_commands]
             
-            # Chaikin's algorithm: for each segment, create two new points at 25% and 75%
+            # Chaikin's algorithm: for each segment, create two new points
             new_knots = [knots[0]]  # Keep first point
             
             for i in range(len(knots) - 1):
                 p0, p1 = knots[i], knots[i + 1]
-                # Q point at 25% of the segment
-                q = p0 + (p1 - p0) * 0.25
-                # R point at 75% of the segment
-                r = p0 + (p1 - p0) * 0.75
+                # Q point at ratio% of the segment
+                q = p0 + (p1 - p0) * ratio
+                # R point at (1-ratio)% of the segment
+                r = p0 + (p1 - p0) * (1 - ratio)
                 new_knots.extend([q, r])
             
             new_knots.append(knots[-1])  # Keep last point
