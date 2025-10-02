@@ -166,9 +166,7 @@ def selective_line_thinning(binary_img, erosion_iterations=1):
     """
     Selective line thinning: erode thick lines, preserve thin lines that would break.
     
-    This method processes each connected component individually:
-    - If erosion would break the component, keep it original
-    - Otherwise, apply erosion to make it thinner
+    Uses skeleton comparison to detect structural changes (not just pixel count).
     
     Args:
         binary_img: Binary image (white lines on black background)
@@ -195,27 +193,80 @@ def selective_line_thinning(binary_img, erosion_iterations=1):
         # Try eroding this component
         eroded_component = cv2.erode(component_mask, kernel, iterations=erosion_iterations)
         
-        # Check if erosion breaks this component (increases component count or loses too much)
-        original_count = count_connected_components(component_mask)
-        eroded_count_check = count_connected_components(eroded_component)
-        
-        original_pixels = cv2.countNonZero(component_mask)
-        eroded_pixels = cv2.countNonZero(eroded_component)
-        
-        # Decide: preserve or erode?
-        if eroded_count_check > original_count or eroded_pixels < original_pixels * 0.3:
-            # Erosion would break this component or lose too much → preserve original
-            result = cv2.bitwise_or(result, component_mask)
-            preserved_count += 1
-        else:
-            # Safe to erode → use eroded version
+        # Check structural integrity using skeleton
+        if is_structure_preserved(component_mask, eroded_component):
+            # Structure intact → use eroded version
             result = cv2.bitwise_or(result, eroded_component)
             eroded_count += 1
+        else:
+            # Structure damaged → preserve original
+            result = cv2.bitwise_or(result, component_mask)
+            preserved_count += 1
     
-    print(f"Preserved {preserved_count} thin components, eroded {eroded_count} thick components")
+    print(f"Preserved {preserved_count} components, eroded {eroded_count} components")
     print(f"White pixels: {cv2.countNonZero(binary_img)} → {cv2.countNonZero(result)}")
     
     return result
+
+
+def is_structure_preserved(original, eroded):
+    """
+    Check if erosion preserves the structural integrity.
+    
+    Uses skeleton comparison: if the skeleton structure remains similar,
+    then erosion is safe.
+    
+    Args:
+        original: Original component mask
+        eroded: Eroded component mask
+    
+    Returns:
+        True if structure is preserved, False if damaged
+    """
+    # Quick checks first
+    eroded_pixels = cv2.countNonZero(eroded)
+    if eroded_pixels == 0:
+        return False  # Component completely eroded
+    
+    original_count = count_connected_components(original)
+    eroded_count = count_connected_components(eroded)
+    if eroded_count > original_count:
+        return False  # Component split into multiple parts
+    
+    # Skeleton comparison for structural integrity
+    original_skeleton = cv2.ximgproc.thinning(original)
+    eroded_skeleton = cv2.ximgproc.thinning(eroded)
+    
+    original_skeleton_pixels = cv2.countNonZero(original_skeleton)
+    eroded_skeleton_pixels = cv2.countNonZero(eroded_skeleton)
+    
+    # If skeleton loses more than 30% of pixels, structure is damaged
+    if eroded_skeleton_pixels < original_skeleton_pixels * 0.7:
+        return False
+    
+    # Check if skeleton endpoints increased (indicates structure break)
+    original_endpoints = count_skeleton_endpoints(original_skeleton)
+    eroded_endpoints = count_skeleton_endpoints(eroded_skeleton)
+    
+    if eroded_endpoints > original_endpoints * 1.5:
+        return False  # Too many new endpoints = structure broken
+    
+    return True
+
+
+def count_skeleton_endpoints(skeleton):
+    """Count endpoints in a skeleton (pixels with only 1 neighbor)"""
+    kernel = np.array([[1, 1, 1],
+                       [1, 10, 1],
+                       [1, 1, 1]], dtype=np.uint8)
+    
+    # Convolve: center pixel = 10, each neighbor = 1
+    filtered = cv2.filter2D(skeleton // 255, -1, kernel)
+    
+    # Endpoint: value = 11 (10 + 1 neighbor)
+    endpoints = np.sum(filtered == 11)
+    
+    return endpoints
 
 
 def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=True):
