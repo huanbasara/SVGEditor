@@ -358,9 +358,16 @@ def thin_component_gently(component, erosion_strength, thin_threshold):
         return component, False, max_radius
     
     # Component is thick, erode it by removing outer pixels
-    # Keep only pixels that are > erosion_strength away from edge
-    # This removes erosion_strength pixels from the boundary
-    result = (dist_transform > erosion_strength).astype(np.uint8) * 255
+    # Calculate effective erosion: don't erode more than what exists
+    effective_erosion = min(erosion_strength, max_radius - 1.0)
+    
+    if effective_erosion < 0.5:
+        # Too small to erode meaningfully
+        return component, False, max_radius
+    
+    # Keep only pixels that are > effective_erosion away from edge
+    # This removes effective_erosion pixels from the boundary
+    result = (dist_transform > effective_erosion).astype(np.uint8) * 255
     
     # Safety check: if result is empty, return original
     result_pixels = cv2.countNonZero(result)
