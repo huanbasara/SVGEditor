@@ -887,3 +887,74 @@ class SVGPath:
                 control.append(cmd.control2.pos)
         line = np.array([self.start_pos.pos, *(cmd.end_pos.pos for cmd in self.path_commands)])
         return np.concatenate([np.array(control).reshape(-1, 2), line], axis=0)
+
+    def smooth_open(self):
+        """
+        Smooth open paths (skeleton lines) using a modified Thomas algorithm
+        with stable boundary conditions. Only adjusts control points, keeps
+        anchor points unchanged.
+        
+        This version fixes the endpoint "ray artifact" issue in the original smooth().
+        
+        Returns:
+            self
+        """
+        from .svg_command import SVGCommandBezier
+        
+        n = len(self.path_commands)
+        if n < 1:
+            return self
+        
+        # Extract knots (anchor points - these never change!)
+        knots = [self.start_pos] + [cmd.end_pos for cmd in self.path_commands]
+        
+        # Special case: single segment
+        if n == 1:
+            p1, p2 = knots[0], knots[1]
+            c1 = p1 + (p2 - p1) * 0.333
+            c2 = p1 + (p2 - p1) * 0.667
+            self.path_commands[0] = SVGCommandBezier(p1, c1, c2, p2)
+            return self
+        
+        # Modified Thomas algorithm with stable open-path boundary conditions
+        r = [Point(0.)] * n
+        f = [0.] * n
+        p = [Point(0.)] * (n + 1)
+        
+        # First equation: natural boundary (zero curvature at start)
+        # 2*p[0] = knots[0] + knots[1]
+        f[0] = 2.0
+        r[0] = knots[0] + knots[1]
+        
+        # Interior equations: standard continuity
+        for i in range(1, n - 1):
+            a = 1.0
+            b = 4.0
+            m = a / f[i - 1]
+            f[i] = b - m
+            r[i] = 4.0 * knots[i] + 2.0 * knots[i + 1] - m * r[i - 1]
+        
+        # Last equation: natural boundary (zero curvature at end)
+        # 2*p[n-1] + p[n] = 3*knots[n]
+        a = 1.0
+        b = 2.0
+        m = a / f[n - 2]
+        f[n - 1] = b - m
+        r[n - 1] = 3.0 * knots[n - 1] + knots[n] - m * r[n - 2]
+        
+        # Back substitution
+        p[n - 1] = r[n - 1] / f[n - 1]
+        for i in range(n - 2, -1, -1):
+            p[i] = (r[i] - p[i + 1]) / f[i]
+        
+        # Calculate last control point with stable formula
+        p[n] = knots[n] + (knots[n] - p[n - 1])
+        
+        # Build bezier commands
+        for i in range(n):
+            p1, p2 = knots[i], knots[i + 1]
+            c1 = p[i]
+            c2 = 2.0 * p2 - p[i + 1]
+            self.path_commands[i] = SVGCommandBezier(p1, c1, c2, p2)
+        
+        return self
