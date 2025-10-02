@@ -78,18 +78,26 @@ import cv2
 import numpy as np
 
 
-def uniform_line_thickness(binary_img, target_thickness=2, tolerance=0.5):
+def uniform_line_thickness(binary_img, target_thickness=2, tolerance=0.5, 
+                          skeleton_pixel_tolerance=0.7, skeleton_endpoint_tolerance=1.5):
     """
     Make all lines uniform thickness: erode thick lines, dilate thin lines.
     
     Args:
         binary_img: Binary image (white lines on black background)
         target_thickness: Target radius for all lines (pixels)
-        tolerance: Tolerance range (lines within ±tolerance are left unchanged)
+        tolerance: Thickness tolerance range (lines within ±tolerance are left unchanged)
+        skeleton_pixel_tolerance: Skeleton pixel preservation ratio (0.7 = allow 30% loss)
+        skeleton_endpoint_tolerance: Skeleton endpoint increase ratio (1.5 = allow 50% increase)
     
     Returns:
         Uniformly thinned/thickened binary image
     """
+    # Store skeleton tolerances for use in helper functions
+    global _skeleton_pixel_tol, _skeleton_endpoint_tol
+    _skeleton_pixel_tol = skeleton_pixel_tolerance
+    _skeleton_endpoint_tol = skeleton_endpoint_tolerance
+    
     # Get all connected components
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
     
@@ -97,6 +105,7 @@ def uniform_line_thickness(binary_img, target_thickness=2, tolerance=0.5):
     
     print(f"Processing {num_labels - 1} connected components...")
     print(f"Target thickness: {target_thickness}px, Tolerance: ±{tolerance}px")
+    print(f"Skeleton preservation: pixel≥{skeleton_pixel_tolerance*100:.0f}%, endpoint≤{(skeleton_endpoint_tolerance-1)*100:.0f}% increase")
     
     eroded_count = 0
     dilated_count = 0
@@ -331,6 +340,8 @@ def is_structure_preserved(original, eroded):
     Uses skeleton comparison: if the skeleton structure remains similar,
     then erosion is safe.
     
+    Uses global tolerance settings: _skeleton_pixel_tol and _skeleton_endpoint_tol
+    
     Args:
         original: Original component mask
         eroded: Eroded component mask
@@ -338,6 +349,10 @@ def is_structure_preserved(original, eroded):
     Returns:
         True if structure is preserved, False if damaged
     """
+    # Get tolerance values (use defaults if not set)
+    pixel_tol = globals().get('_skeleton_pixel_tol', 0.7)
+    endpoint_tol = globals().get('_skeleton_endpoint_tol', 1.5)
+    
     # Quick checks first
     eroded_pixels = cv2.countNonZero(eroded)
     if eroded_pixels == 0:
@@ -355,15 +370,15 @@ def is_structure_preserved(original, eroded):
     original_skeleton_pixels = cv2.countNonZero(original_skeleton)
     eroded_skeleton_pixels = cv2.countNonZero(eroded_skeleton)
     
-    # If skeleton loses more than 30% of pixels, structure is damaged
-    if eroded_skeleton_pixels < original_skeleton_pixels * 0.7:
+    # Check skeleton pixel preservation
+    if eroded_skeleton_pixels < original_skeleton_pixels * pixel_tol:
         return False
     
     # Check if skeleton endpoints increased (indicates structure break)
     original_endpoints = count_skeleton_endpoints(original_skeleton)
     eroded_endpoints = count_skeleton_endpoints(eroded_skeleton)
     
-    if eroded_endpoints > original_endpoints * 1.5:
+    if eroded_endpoints > original_endpoints * endpoint_tol:
         return False  # Too many new endpoints = structure broken
     
     return True
