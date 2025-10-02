@@ -427,6 +427,62 @@ class SVGPath:
 
         return self
 
+    def smooth_clamped(self, max_ratio=3.0):
+        """
+        Smooth bezier curves with control point clamping to prevent ray artifacts.
+        
+        Args:
+            max_ratio: Maximum allowed ratio of control point distance to segment length (default: 3.0)
+        
+        Returns:
+            self
+        """
+        n = len(self.path_commands)
+        knots = [self.start_pos, *(path_commmand.end_pos for path_commmand in self.path_commands)]
+        r = [knots[0] + 2 * knots[1]]
+        f = [2]
+        p = [Point(0.)] * (n + 1)
+
+        # Solve with the Thomas algorithm
+        for i in range(1, n):
+            internal = i < n - 1
+            a = 1
+            b = 4 if internal else 2
+            u = 4 if internal else 3
+            v = 2 if internal else 0
+            m = a / f[i-1]
+
+            f.append(b-m)
+            r.append(u * knots[i] + v * knots[i + 1] - m * r[i-1])
+
+        p[n-1] = r[n-1] / f[n-1]
+        for i in range(n-2, -1, -1):
+            p[i] = (r[i] - p[i+1]) / f[i]
+        p[n] = (3 * knots[n] - p[n-1]) / 2
+
+        for i in range(n):
+            p1, p2 = knots[i], knots[i+1]
+            c1, c2 = p[i], 2 * p2 - p[i+1]
+            
+            # Clamp control points to prevent ray artifacts
+            segment_length = p1.dist(p2)
+            if segment_length > 0:
+                max_control_dist = segment_length * max_ratio
+                
+                # Clamp c1
+                d1 = p1.dist(c1)
+                if d1 > max_control_dist:
+                    c1 = p1 + (c1 - p1) * (max_control_dist / d1)
+                
+                # Clamp c2
+                d2 = p2.dist(c2)
+                if d2 > max_control_dist:
+                    c2 = p2 + (c2 - p2) * (max_control_dist / d2)
+            
+            self.path_commands[i] = SVGCommandBezier(p1, c1, c2, p2)
+
+        return self
+
     def simplify_heuristic(self):
         return self.copy().split(max_dist=2, include_lines=False) \
             .simplify(tolerance=0.1, epsilon=0.2, angle_threshold=150) \
