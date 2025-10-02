@@ -68,3 +68,161 @@ def create_comparison_plot(original_image, edited_image, prompt, save_path):
     plt.show()
     
     return save_path
+
+
+# ============================================================================
+# Line Thinning Functions (追加的新功能)
+# ============================================================================
+
+import cv2
+import numpy as np
+
+
+def get_skeleton(binary_img):
+    """
+    Extract skeleton (centerline) of binary image using morphological thinning.
+    This preserves connectivity while reducing thickness to 1 pixel.
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+    
+    Returns:
+        Skeleton image
+    """
+    # Convert to binary format required by morphologyEx
+    img_binary = binary_img.copy()
+    img_binary[img_binary > 0] = 1
+    
+    # Morphological skeleton
+    skeleton = np.zeros_like(img_binary)
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    
+    while True:
+        # Erode the image
+        eroded = cv2.erode(img_binary, kernel)
+        
+        # Dilate the eroded image
+        temp = cv2.dilate(eroded, kernel)
+        
+        # Subtract the dilated image from the original
+        temp = cv2.subtract(img_binary, temp)
+        
+        # Bitwise OR with the skeleton
+        skeleton = cv2.bitwise_or(skeleton, temp)
+        
+        # Update the image for next iteration
+        img_binary = eroded.copy()
+        
+        # Stop when image is completely eroded
+        if cv2.countNonZero(img_binary) == 0:
+            break
+    
+    # Convert back to 0-255 range
+    skeleton = skeleton * 255
+    
+    return skeleton
+
+
+def count_connected_components(binary_img):
+    """Count number of connected components in binary image"""
+    num_labels, _, _, _ = cv2.connectedComponentsWithStats(binary_img)
+    return num_labels - 1  # Subtract background
+
+
+def adaptive_line_thinning(binary_img, max_iterations=3, preserve_connectivity=True):
+    """
+    Adaptively thin lines: reduce thickness of thick lines while preserving thin lines.
+    
+    This method uses controlled erosion that stops when a line would break.
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+        max_iterations: Maximum erosion iterations (controls how much thinning)
+        preserve_connectivity: If True, stop erosion if connectivity would be lost
+    
+    Returns:
+        Thinned binary image
+    """
+    result = binary_img.copy()
+    kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    
+    for i in range(max_iterations):
+        # Try erosion
+        eroded = cv2.erode(result, kernel, iterations=1)
+        
+        if preserve_connectivity:
+            # Check if erosion breaks connectivity
+            original_components = count_connected_components(result)
+            eroded_components = count_connected_components(eroded)
+            
+            # If erosion increases component count, it broke some connections
+            if eroded_components > original_components:
+                print(f"Stopped at iteration {i}: erosion would break connectivity")
+                break
+            
+            # Check if any line completely disappeared
+            original_nonzero = cv2.countNonZero(result)
+            eroded_nonzero = cv2.countNonZero(eroded)
+            
+            # If we lost more than 50% of pixels, stop (too aggressive)
+            if eroded_nonzero < original_nonzero * 0.5:
+                print(f"Stopped at iteration {i}: too much pixel loss")
+                break
+        
+        result = eroded
+        print(f"Iteration {i+1}: kept {cv2.countNonZero(result)} pixels")
+    
+    return result
+
+
+def smart_line_thinning(binary_img, target_width=2):
+    """
+    Smart line thinning using distance transform and skeleton.
+    
+    Strategy:
+    1. Calculate distance transform (measures line thickness at each point)
+    2. Extract skeleton (centerline)
+    3. Rebuild lines from skeleton with uniform target width
+    4. For originally thin lines (width < target), preserve original
+    
+    Args:
+        binary_img: Binary image (white lines on black background)
+        target_width: Target line width in pixels
+    
+    Returns:
+        Thinned binary image with more uniform thickness
+    """
+    # Distance transform: measures distance from each white pixel to nearest edge
+    dist_transform = cv2.distanceTransform(binary_img, cv2.DIST_L2, 5)
+    
+    # Extract skeleton
+    skeleton = get_skeleton(binary_img)
+    
+    # Rebuild lines from skeleton with target width
+    half_width = target_width // 2
+    kernel_size = target_width + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    
+    # Dilate skeleton to target width
+    uniform_lines = cv2.dilate(skeleton, kernel, iterations=1)
+    
+    # Identify originally thin lines (max distance < target_width / 2)
+    # For these areas, preserve original
+    thin_mask = np.zeros_like(binary_img, dtype=bool)
+    
+    # Get connected components of original image
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_img)
+    
+    for i in range(1, num_labels):
+        component_mask = (labels == i)
+        max_dist = np.max(dist_transform[component_mask])
+        
+        # If max distance < target_width/2, this is a thin line
+        if max_dist < half_width:
+            thin_mask[component_mask] = True
+    
+    # Combine: use uniform width for thick lines, preserve original for thin lines
+    result = uniform_lines.copy()
+    result[thin_mask] = binary_img[thin_mask]
+    
+    return result
