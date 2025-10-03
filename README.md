@@ -91,8 +91,70 @@ This is a research project. Feel free to:
 
 MIT License - see LICENSE file for details.
 
+## 🔧 SVG Optimization Pipeline
+
+### SVG Simplification Algorithm
+
+The `simplify()` function in `svglib` performs different operations depending on the input SVG type:
+
+#### 1. For Line-based SVG (L commands)
+When the SVG consists of straight lines (like skeleton extraction output):
+
+**Step 1: RDP Algorithm (Ramer-Douglas-Peucker)**
+- Reduces the number of points while preserving the overall shape
+- Controlled by `tolerance` parameter (pixels)
+- Higher tolerance = more aggressive simplification = fewer points
+
+**Step 2: Bezier Curve Fitting**
+- Converts simplified polylines into smooth Bezier curves (C commands)
+- Uses least-squares fitting based on [Paper.js PathFitter](https://github.com/paperjs/paper.js/blob/develop/src/path/PathFitter.js)
+- Controlled by `epsilon` parameter (fitting precision)
+- Lower epsilon = more accurate curve fitting
+
+**Parameters:**
+```python
+svg.simplify(
+    tolerance=2.0,      # RDP simplification tolerance (pixels)
+    epsilon=0.1,        # Bezier fitting precision
+    force_smooth=True   # Force smooth curve generation
+)
+```
+
+#### 2. For Bezier-based SVG (C commands)
+When the SVG already contains Bezier curves:
+
+**Additional Step: Curve Merging**
+- Merges adjacent Bezier curves with similar tangent directions
+- Controlled by `angle_threshold` parameter (degrees)
+- Only merges curves when angle difference < threshold
+- **Note:** This parameter has NO effect on line-based SVG
+
+**Example:**
+- `angle_threshold=179`: Only merge nearly straight curves (conservative)
+- `angle_threshold=150`: More aggressive merging (may lose detail)
+
+### Workflow Summary
+
+```
+Line-based SVG → RDP Simplification → Bezier Fitting → Optimized SVG
+                 (tolerance)           (epsilon)
+
+Bezier-based SVG → Curve Merging → Optimized SVG
+                   (angle_threshold)
+```
+
+### Implementation Reference
+
+The skeleton-to-SVG workflow uses:
+1. **Skeleton Extraction**: Produces single-pixel wide paths
+2. **Path Tracing**: Converts pixels to line segments (L commands)
+3. **SVG Simplification**: Applies RDP + Bezier fitting
+4. **Output**: Smooth, compact SVG with Bezier curves
+
 ## 📚 References
 
 - InstructPix2Pix: [Paper](https://arxiv.org/abs/2211.09800)
 - Stable Diffusion: [Paper](https://arxiv.org/abs/2112.10752)
 - Anime models: [CivitAI Community](https://civitai.com)
+- RDP Algorithm: [Ramer-Douglas-Peucker](https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm)
+- Bezier Curve Fitting: [Paper.js PathFitter](https://github.com/paperjs/paper.js/blob/develop/src/path/PathFitter.js)
