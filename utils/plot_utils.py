@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
 
 
 def plot_images(images_and_titles):
@@ -19,7 +21,13 @@ def plot_images(images_and_titles):
         axes = [axes]
     
     for i, (image, title) in enumerate(images_and_titles):
-        axes[i].imshow(image)
+        # Auto-detect grayscale images and use gray colormap
+        if isinstance(image, Image.Image) and image.mode == 'L':
+            axes[i].imshow(image, cmap='gray')
+        elif isinstance(image, np.ndarray) and len(image.shape) == 2:
+            axes[i].imshow(image, cmap='gray')
+        else:
+            axes[i].imshow(image)
         axes[i].set_title(title)
         axes[i].axis('off')
     
