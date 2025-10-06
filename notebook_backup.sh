@@ -7,8 +7,8 @@ echo "📓 Starting notebook backup process..."
 echo "⏰ Timestamp: $TIMESTAMP"
 
 # 定义文件路径
-SOURCE_NOTEBOOK="notebooks/SVGEditorWorkflow.ipynb"
-BACKUP_NOTEBOOK="notebooks/SVGEditorWorkflow_bak.ipynb"
+SOURCE_NOTEBOOK="notebooks/SvgDiffusion.ipynb"
+BACKUP_NOTEBOOK="notebooks/SvgDiffusion_bak.ipynb"
 
 # 检查源文件是否存在
 if [ ! -f "$SOURCE_NOTEBOOK" ]; then
