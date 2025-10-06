@@ -32,12 +32,20 @@ def edit_image_with_openai(image_path: str, instruction: str, api_key: str, mode
                 n=1
             )
         
-        if response.data:
-            return response.data[0].url
+        print(f"API Response: {response}")
+        print(f"Response data: {response.data}")
+        print(f"Response data length: {len(response.data) if response.data else 0}")
+        
+        if response.data and len(response.data) > 0:
+            url = response.data[0].url
+            print(f"Image URL: {url}")
+            return url
         else:
+            print("No data in response")
             return ""
             
     except Exception as e:
+        print(f"Exception in edit_image_with_openai: {e}")
         return ""
 
 def download_image(url: str, save_path: str) -> bool:
