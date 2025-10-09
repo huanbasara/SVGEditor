@@ -16,8 +16,9 @@ import lpips
 class DiffusionEvaluator:
     """Comprehensive evaluator for diffusion model image editing"""
     
-    def __init__(self, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, device='cuda' if torch.cuda.is_available() else 'cpu', image_size=256):
         self.device = device
+        self.image_size = image_size
         
         # Load CLIP model
         self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
@@ -48,9 +49,25 @@ class DiffusionEvaluator:
         Returns:
             dict: Comprehensive evaluation scores
         """
-        # Load images
-        img_before = self._load_image(img_before)
-        img_after = self._load_image(img_after)
+        # Auto-detect image sizes and use the smaller one for consistent processing
+        if isinstance(img_before, str):
+            before_img = Image.open(img_before)
+        else:
+            before_img = img_before
+            
+        if isinstance(img_after, str):
+            after_img = Image.open(img_after)
+        else:
+            after_img = img_after
+        
+        # Get image sizes and use the smaller dimension
+        before_size = min(before_img.size)
+        after_size = min(after_img.size)
+        target_size = min(before_size, after_size)
+        
+        # Load and resize images to the smaller size
+        img_before = self._load_image(img_before, target_size=target_size)
+        img_after = self._load_image(img_after, target_size=target_size)
         
         # 1. Edit Compliance
         directional_clip = self._directional_clip(img_before, img_after, text_source, text_target)
@@ -88,11 +105,20 @@ class DiffusionEvaluator:
             'total_score': float(total_score)
         }
     
-    def _load_image(self, img):
+    def _load_image(self, img, target_size=None):
         """Load image from path or return PIL Image"""
         if isinstance(img, str):
-            return Image.open(img).convert('RGB')
-        return img.convert('RGB')
+            img = Image.open(img).convert('RGB')
+        else:
+            img = img.convert('RGB')
+        
+        # If target_size is provided, resize to that size
+        if target_size is not None:
+            img = img.resize((target_size, target_size), Image.Resampling.LANCZOS)
+        elif self.image_size is not None:
+            img = img.resize((self.image_size, self.image_size), Image.Resampling.LANCZOS)
+        
+        return img
     
     def _get_clip_embeddings(self, images=None, texts=None):
         """Get CLIP embeddings for images or texts"""
@@ -153,13 +179,10 @@ class DiffusionEvaluator:
     
     def _lpips_score(self, img_before, img_after):
         """Compute LPIPS perceptual similarity"""
-        # Resize to 256x256 for LPIPS
-        img_before_resized = img_before.resize((256, 256), Image.Resampling.LANCZOS)
-        img_after_resized = img_after.resize((256, 256), Image.Resampling.LANCZOS)
-        
+        # Images are already resized to consistent size in evaluate()
         # Convert to tensors [-1, 1]
-        img_before_tensor = torch.from_numpy(np.array(img_before_resized)).permute(2, 0, 1).float() / 127.5 - 1
-        img_after_tensor = torch.from_numpy(np.array(img_after_resized)).permute(2, 0, 1).float() / 127.5 - 1
+        img_before_tensor = torch.from_numpy(np.array(img_before)).permute(2, 0, 1).float() / 127.5 - 1
+        img_after_tensor = torch.from_numpy(np.array(img_after)).permute(2, 0, 1).float() / 127.5 - 1
         
         img_before_tensor = img_before_tensor.unsqueeze(0).to(self.device)
         img_after_tensor = img_after_tensor.unsqueeze(0).to(self.device)
@@ -200,7 +223,7 @@ class DiffusionEvaluator:
         return max(0.0, min(1.0, aesthetic_score))
 
 
-def evaluate_single_image(img_before_path, img_after_path, text_source, text_target, edit_prompt, device='cuda'):
+def evaluate_single_image(img_before_path, img_after_path, text_source, text_target, edit_prompt, device='cuda', image_size=256):
     """
     Convenience function for single image evaluation
     
@@ -211,10 +234,11 @@ def evaluate_single_image(img_before_path, img_after_path, text_source, text_tar
         text_target: Target attribute description
         edit_prompt: Full edit instruction
         device: Device to run on ('cuda' or 'cpu')
+        image_size: Image size for processing (default: 256)
     
     Returns:
         dict: Evaluation scores
     """
-    evaluator = DiffusionEvaluator(device=device)
+    evaluator = DiffusionEvaluator(device=device, image_size=image_size)
     return evaluator.evaluate(img_before_path, img_after_path, text_source, text_target, edit_prompt)
 
