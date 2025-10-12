@@ -3,12 +3,8 @@ Diffusion Model Evaluation Metrics
 Provides comprehensive evaluation for image editing results
 """
 
-import torch
-import torch.nn.functional as F
 import numpy as np
-from PIL import Image
 import cv2
-from transformers import CLIPProcessor, CLIPModel
 from skimage.metrics import structural_similarity as ssim
 import lpips
 
@@ -258,16 +254,12 @@ class VectorizationVisualEvaluator:
     def __init__(self, device='cuda' if torch.cuda.is_available() else 'cpu'):
         self.device = device
         
-        # Load CLIP model for aesthetic evaluation
-        self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
-        self.clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        # No longer need CLIP model for simplified evaluation
         
         # Weights for overall score
         self.weights = {
-            'structure_similarity': 0.40,  # SSIM - most important
-            'aesthetic_quality': 0.30,     # Visual beauty
-            'line_quality': 0.20,          # Line continuity & uniformity
-            'clarity': 0.10               # Contrast & sharpness
+            'structure_similarity': 0.70,  # SSIM - most important
+            'line_quality': 0.30,          # Line continuity, smoothness & uniformity
         }
     
     def evaluate(self, original_img, vectorized_img):
@@ -292,28 +284,18 @@ class VectorizationVisualEvaluator:
         # 1. Structural Similarity (SSIM)
         ssim_score = self._compute_ssim(original, vectorized)
         
-        # 2. Aesthetic Quality (CLIP-based)
-        aesthetic_score = self._compute_aesthetic_quality(vectorized)
-        
-        # 3. Line Quality
+        # 2. Line Quality (continuity, smoothness, uniformity)
         line_quality_score = self._compute_line_quality(vectorized)
-        
-        # 4. Clarity (Laplacian variance)
-        clarity_score = self._compute_clarity(vectorized)
         
         # Overall score (weighted average)
         overall_score = (
             self.weights['structure_similarity'] * ssim_score +
-            self.weights['aesthetic_quality'] * aesthetic_score +
-            self.weights['line_quality'] * line_quality_score +
-            self.weights['clarity'] * clarity_score
+            self.weights['line_quality'] * line_quality_score
         )
         
         return {
             'structure_similarity': float(ssim_score),
-            'aesthetic_quality': float(aesthetic_score),
             'line_quality': float(line_quality_score),
-            'clarity': float(clarity_score),
             'overall_score': float(overall_score),
             'quality_level': self._get_quality_level(overall_score)
         }
@@ -348,64 +330,15 @@ class VectorizationVisualEvaluator:
         # Normalize to [0, 1]
         return max(0.0, (similarity + 1) / 2)
     
-    def _compute_aesthetic_quality(self, vectorized_img):
-        """
-        Compute aesthetic quality using CLIP
-        
-        Evaluates how well the image matches aesthetic quality descriptions
-        """
-        # Convert to PIL RGB for CLIP
-        if len(vectorized_img.shape) == 2:
-            pil_img = Image.fromarray(vectorized_img).convert('RGB')
-        else:
-            pil_img = Image.fromarray(vectorized_img)
-        
-        # Aesthetic prompts
-        positive_prompts = [
-            "high quality line art",
-            "clean professional drawing",
-            "smooth elegant illustration"
-        ]
-        negative_prompts = [
-            "low quality sketch",
-            "messy rough drawing",
-            "blurry distorted image"
-        ]
-        
-        with torch.no_grad():
-            # Get image embedding
-            img_inputs = self.clip_processor(images=[pil_img], return_tensors="pt", padding=True)
-            img_inputs = {k: v.to(self.device) for k, v in img_inputs.items()}
-            img_features = self.clip_model.get_image_features(**img_inputs)
-            img_emb = F.normalize(img_features, dim=-1)
-            
-            # Get positive prompt embeddings
-            pos_inputs = self.clip_processor(text=positive_prompts, return_tensors="pt", padding=True)
-            pos_inputs = {k: v.to(self.device) for k, v in pos_inputs.items()}
-            pos_features = self.clip_model.get_text_features(**pos_inputs)
-            pos_emb = F.normalize(pos_features, dim=-1)
-            
-            # Get negative prompt embeddings
-            neg_inputs = self.clip_processor(text=negative_prompts, return_tensors="pt", padding=True)
-            neg_inputs = {k: v.to(self.device) for k, v in neg_inputs.items()}
-            neg_features = self.clip_model.get_text_features(**neg_inputs)
-            neg_emb = F.normalize(neg_features, dim=-1)
-            
-            # Compute similarities
-            pos_sim = F.cosine_similarity(img_emb, pos_emb.mean(dim=0, keepdim=True)).item()
-            neg_sim = F.cosine_similarity(img_emb, neg_emb.mean(dim=0, keepdim=True)).item()
-        
-        # Combine scores: emphasize positive, penalize negative
-        aesthetic_score = (pos_sim - neg_sim + 2) / 4  # Normalize to [0, 1]
-        return max(0.0, min(1.0, aesthetic_score))
     
     def _compute_line_quality(self, vectorized_img):
         """
-        Compute line quality: continuity and uniformity
+        Compute line quality: continuity, smoothness and uniformity
         
         Evaluates:
         1. Line continuity (fewer endpoints = more continuous)
-        2. Line width uniformity (lower variance = more uniform)
+        2. Line smoothness (curvature variance = smoother lines)
+        3. Line width uniformity (lower variance = more uniform)
         """
         from skimage.morphology import skeletonize
         
@@ -420,10 +353,12 @@ class VectorizationVisualEvaluator:
         n_endpoints = len(endpoints)
         
         # Normalize: fewer endpoints = better continuity
-        # Assume reasonable range: 0-100 endpoints
         continuity_score = 1.0 / (1.0 + n_endpoints / 20.0)
         
-        # 2. Uniformity: measure line width variance
+        # 2. Smoothness: measure curvature variance
+        smoothness_score = self._compute_smoothness(skeleton)
+        
+        # 3. Uniformity: measure line width variance
         if np.sum(binary > 0) > 0:
             dist_transform = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
             line_widths = dist_transform[binary > 0]
@@ -435,9 +370,54 @@ class VectorizationVisualEvaluator:
             uniformity_score = 0.0
         
         # Combine scores
-        line_quality = (continuity_score + uniformity_score) / 2
+        line_quality = (continuity_score + smoothness_score + uniformity_score) / 3
         
         return line_quality
+    
+    def _compute_smoothness(self, skeleton):
+        """
+        Compute line smoothness based on curvature variance
+        
+        Lower curvature variance = smoother lines
+        """
+        # Find skeleton points
+        skeleton_points = np.where(skeleton > 0)
+        if len(skeleton_points[0]) < 3:
+            return 1.0  # Perfect smoothness for very simple skeletons
+        
+        # Convert to coordinate list
+        points = list(zip(skeleton_points[1], skeleton_points[0]))  # (x, y)
+        
+        if len(points) < 3:
+            return 1.0
+        
+        # Compute curvature at each point (except endpoints)
+        curvatures = []
+        for i in range(1, len(points) - 1):
+            p1, p2, p3 = points[i-1], points[i], points[i+1]
+            
+            # Compute curvature using the formula: |cross_product| / |distance|^3
+            # Simplified for 2D: |(p2-p1) × (p3-p2)| / |p2-p1|^3
+            v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+            v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+            
+            cross_product = abs(v1[0] * v2[1] - v1[1] * v2[0])
+            distance = np.linalg.norm(v1)
+            
+            if distance > 0:
+                curvature = cross_product / (distance ** 3)
+                curvatures.append(curvature)
+        
+        if len(curvatures) == 0:
+            return 1.0
+        
+        # Compute variance of curvatures
+        curvature_variance = np.var(curvatures)
+        
+        # Normalize: lower variance = smoother lines
+        smoothness_score = 1.0 / (1.0 + curvature_variance / 5.0)
+        
+        return smoothness_score
     
     def _find_skeleton_endpoints(self, skeleton):
         """Find skeleton endpoints (pixels with only one neighbor)"""
@@ -450,21 +430,6 @@ class VectorizationVisualEvaluator:
         
         return list(zip(endpoints[0], endpoints[1]))
     
-    def _compute_clarity(self, vectorized_img):
-        """
-        Compute image clarity using Laplacian variance
-        
-        Higher variance = sharper edges = better clarity
-        """
-        # Compute Laplacian
-        laplacian = cv2.Laplacian(vectorized_img, cv2.CV_64F)
-        laplacian_var = laplacian.var()
-        
-        # Normalize using sigmoid
-        # Typical range: 0-1000 for line art
-        clarity_score = 1.0 / (1.0 + np.exp(-laplacian_var / 100))
-        
-        return clarity_score
     
     def _get_quality_level(self, overall_score):
         """Get quality level description from overall score"""
