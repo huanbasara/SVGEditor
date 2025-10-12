@@ -242,3 +242,254 @@ def evaluate_single_image(img_before_path, img_after_path, text_source, text_tar
     evaluator = DiffusionEvaluator(device=device, image_size=image_size)
     return evaluator.evaluate(img_before_path, img_after_path, text_source, text_target, edit_prompt)
 
+
+class VectorizationVisualEvaluator:
+    """
+    Visual quality evaluator for vectorization process
+    
+    Evaluates the visual quality of vectorized images (skeleton or SVG rendered)
+    against the original image, focusing on:
+    1. Structural similarity (SSIM)
+    2. Aesthetic quality (CLIP-based)
+    3. Line quality (continuity & uniformity)
+    4. Clarity (Laplacian variance)
+    """
+    
+    def __init__(self, device='cuda' if torch.cuda.is_available() else 'cpu'):
+        self.device = device
+        
+        # Load CLIP model for aesthetic evaluation
+        self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+        self.clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        
+        # Weights for overall score
+        self.weights = {
+            'structure_similarity': 0.40,  # SSIM - most important
+            'aesthetic_quality': 0.30,     # Visual beauty
+            'line_quality': 0.20,          # Line continuity & uniformity
+            'clarity': 0.10               # Contrast & sharpness
+        }
+    
+    def evaluate(self, original_img, vectorized_img):
+        """
+        Evaluate vectorization visual quality
+        
+        Args:
+            original_img: Original image (path or PIL Image or numpy array)
+            vectorized_img: Vectorized image (path or PIL Image or numpy array)
+            
+        Returns:
+            dict: Comprehensive visual quality scores
+        """
+        # Load images
+        original = self._load_image(original_img)
+        vectorized = self._load_image(vectorized_img)
+        
+        # Ensure same size
+        if original.shape != vectorized.shape:
+            vectorized = cv2.resize(vectorized, (original.shape[1], original.shape[0]))
+        
+        # 1. Structural Similarity (SSIM)
+        ssim_score = self._compute_ssim(original, vectorized)
+        
+        # 2. Aesthetic Quality (CLIP-based)
+        aesthetic_score = self._compute_aesthetic_quality(vectorized)
+        
+        # 3. Line Quality
+        line_quality_score = self._compute_line_quality(vectorized)
+        
+        # 4. Clarity (Laplacian variance)
+        clarity_score = self._compute_clarity(vectorized)
+        
+        # Overall score (weighted average)
+        overall_score = (
+            self.weights['structure_similarity'] * ssim_score +
+            self.weights['aesthetic_quality'] * aesthetic_score +
+            self.weights['line_quality'] * line_quality_score +
+            self.weights['clarity'] * clarity_score
+        )
+        
+        return {
+            'structure_similarity': float(ssim_score),
+            'aesthetic_quality': float(aesthetic_score),
+            'line_quality': float(line_quality_score),
+            'clarity': float(clarity_score),
+            'overall_score': float(overall_score),
+            'quality_level': self._get_quality_level(overall_score)
+        }
+    
+    def _load_image(self, img):
+        """Load image from various formats to grayscale numpy array"""
+        if isinstance(img, str):
+            # Load from path
+            img_array = cv2.imread(img, cv2.IMREAD_GRAYSCALE)
+            if img_array is None:
+                raise ValueError(f"Failed to load image from {img}")
+            return img_array
+        elif isinstance(img, Image.Image):
+            # Convert PIL Image to numpy
+            return np.array(img.convert('L'))
+        elif isinstance(img, np.ndarray):
+            # Already numpy array
+            if len(img.shape) == 3:
+                return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+            return img
+        else:
+            raise TypeError(f"Unsupported image type: {type(img)}")
+    
+    def _compute_ssim(self, original, vectorized):
+        """
+        Compute Structural Similarity Index (SSIM)
+        
+        Measures structural similarity between original and vectorized images
+        Range: [-1, 1], higher is better
+        """
+        similarity = ssim(original, vectorized)
+        # Normalize to [0, 1]
+        return max(0.0, (similarity + 1) / 2)
+    
+    def _compute_aesthetic_quality(self, vectorized_img):
+        """
+        Compute aesthetic quality using CLIP
+        
+        Evaluates how well the image matches aesthetic quality descriptions
+        """
+        # Convert to PIL RGB for CLIP
+        if len(vectorized_img.shape) == 2:
+            pil_img = Image.fromarray(vectorized_img).convert('RGB')
+        else:
+            pil_img = Image.fromarray(vectorized_img)
+        
+        # Aesthetic prompts
+        positive_prompts = [
+            "high quality line art",
+            "clean professional drawing",
+            "smooth elegant illustration"
+        ]
+        negative_prompts = [
+            "low quality sketch",
+            "messy rough drawing",
+            "blurry distorted image"
+        ]
+        
+        with torch.no_grad():
+            # Get image embedding
+            img_inputs = self.clip_processor(images=[pil_img], return_tensors="pt", padding=True)
+            img_inputs = {k: v.to(self.device) for k, v in img_inputs.items()}
+            img_features = self.clip_model.get_image_features(**img_inputs)
+            img_emb = F.normalize(img_features, dim=-1)
+            
+            # Get positive prompt embeddings
+            pos_inputs = self.clip_processor(text=positive_prompts, return_tensors="pt", padding=True)
+            pos_inputs = {k: v.to(self.device) for k, v in pos_inputs.items()}
+            pos_features = self.clip_model.get_text_features(**pos_inputs)
+            pos_emb = F.normalize(pos_features, dim=-1)
+            
+            # Get negative prompt embeddings
+            neg_inputs = self.clip_processor(text=negative_prompts, return_tensors="pt", padding=True)
+            neg_inputs = {k: v.to(self.device) for k, v in neg_inputs.items()}
+            neg_features = self.clip_model.get_text_features(**neg_inputs)
+            neg_emb = F.normalize(neg_features, dim=-1)
+            
+            # Compute similarities
+            pos_sim = F.cosine_similarity(img_emb, pos_emb.mean(dim=0, keepdim=True)).item()
+            neg_sim = F.cosine_similarity(img_emb, neg_emb.mean(dim=0, keepdim=True)).item()
+        
+        # Combine scores: emphasize positive, penalize negative
+        aesthetic_score = (pos_sim - neg_sim + 2) / 4  # Normalize to [0, 1]
+        return max(0.0, min(1.0, aesthetic_score))
+    
+    def _compute_line_quality(self, vectorized_img):
+        """
+        Compute line quality: continuity and uniformity
+        
+        Evaluates:
+        1. Line continuity (fewer endpoints = more continuous)
+        2. Line width uniformity (lower variance = more uniform)
+        """
+        from skimage.morphology import skeletonize
+        
+        # Binarize image
+        _, binary = cv2.threshold(vectorized_img, 127, 255, cv2.THRESH_BINARY_INV)
+        
+        # Extract skeleton
+        skeleton = skeletonize(binary > 0)
+        
+        # 1. Continuity: count endpoints
+        endpoints = self._find_skeleton_endpoints(skeleton)
+        n_endpoints = len(endpoints)
+        
+        # Normalize: fewer endpoints = better continuity
+        # Assume reasonable range: 0-100 endpoints
+        continuity_score = 1.0 / (1.0 + n_endpoints / 20.0)
+        
+        # 2. Uniformity: measure line width variance
+        if np.sum(binary > 0) > 0:
+            dist_transform = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
+            line_widths = dist_transform[binary > 0]
+            width_variance = np.var(line_widths)
+            
+            # Normalize: lower variance = better uniformity
+            uniformity_score = 1.0 / (1.0 + width_variance / 10.0)
+        else:
+            uniformity_score = 0.0
+        
+        # Combine scores
+        line_quality = (continuity_score + uniformity_score) / 2
+        
+        return line_quality
+    
+    def _find_skeleton_endpoints(self, skeleton):
+        """Find skeleton endpoints (pixels with only one neighbor)"""
+        kernel = np.array([[1, 1, 1],
+                          [1, 10, 1],
+                          [1, 1, 1]], dtype=np.uint8)
+        
+        neighbor_count = cv2.filter2D(skeleton.astype(np.uint8), -1, kernel)
+        endpoints = np.where((skeleton == 1) & (neighbor_count == 11))
+        
+        return list(zip(endpoints[0], endpoints[1]))
+    
+    def _compute_clarity(self, vectorized_img):
+        """
+        Compute image clarity using Laplacian variance
+        
+        Higher variance = sharper edges = better clarity
+        """
+        # Compute Laplacian
+        laplacian = cv2.Laplacian(vectorized_img, cv2.CV_64F)
+        laplacian_var = laplacian.var()
+        
+        # Normalize using sigmoid
+        # Typical range: 0-1000 for line art
+        clarity_score = 1.0 / (1.0 + np.exp(-laplacian_var / 100))
+        
+        return clarity_score
+    
+    def _get_quality_level(self, overall_score):
+        """Get quality level description from overall score"""
+        if overall_score >= 0.8:
+            return "Excellent"
+        elif overall_score >= 0.65:
+            return "Good"
+        elif overall_score >= 0.5:
+            return "Acceptable"
+        else:
+            return "Needs Improvement"
+
+
+def evaluate_vectorization_visual(original_img, vectorized_img, device='cuda'):
+    """
+    Convenience function for vectorization visual quality evaluation
+    
+    Args:
+        original_img: Original image (path or PIL Image or numpy array)
+        vectorized_img: Vectorized image (path or PIL Image or numpy array)
+        device: Device to run on ('cuda' or 'cpu')
+    
+    Returns:
+        dict: Visual quality evaluation scores
+    """
+    evaluator = VectorizationVisualEvaluator(device=device)
+    return evaluator.evaluate(original_img, vectorized_img)
+
