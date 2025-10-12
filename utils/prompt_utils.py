@@ -11,79 +11,31 @@ EDIT_INSTRUCTIONS = {
     "penguin": "Make the penguin fatter",
     
     # Batch targets for vectorization workflow
-    "41_A": (
-        "Transform the armor into casual dress clothing. "
-        "Replace the metallic armor pieces with soft fabric dress. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "41_B": (
-        "Transform the armor into casual dress clothing. "
-        "Replace the metallic armor pieces with soft fabric dress. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "65_A": (
-        "Remove the scarf and reveal the neck underneath. "
-        "Show the clear neck line and collar area. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "65_B": (
-        "Remove the scarf and reveal the neck underneath. "
-        "Show the clear neck line and collar area. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "153_A": (
-        "Transform this girl's long ponytail into a chic, shoulder-length layered cut. "
-        "Remove all long flowing hair. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "153_B": (
-        "Transform this girl's long ponytail into a chic, shoulder-length layered cut. "
-        "Remove all long flowing hair. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "254_A": (
-        "Transform the braided pigtails into straight long hair. "
-        "Replace the braided style with smooth, flowing straight hair. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "254_B": (
-        "Transform the braided pigtails into straight long hair. "
-        "Replace the braided style with smooth, flowing straight hair. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "710_A": (
-        "Change the angry facial expression to a happy expression. "
-        "Transform frowning mouth to smiling, relaxed eyebrows. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "710_B": (
-        "Change the angry facial expression to a happy expression. "
-        "Transform frowning mouth to smiling, relaxed eyebrows. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "1061_A": (
-        "Transform the conflict scene into a hugging scene. "
-        "Change the fighting poses to embracing poses. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
-    "1061_B": (
-        "Transform the conflict scene into a hugging scene. "
-        "Change the fighting poses to embracing poses. "
-        "Ensure clean, continuous lines without artifacts."
-    ),
+    "41_A": "Transform the armor into casual dress clothing",
+    "41_B": "Transform the armor into casual dress clothing",
+    "65_A": "Remove the scarf and reveal the neck underneath",
+    "65_B": "Remove the scarf and reveal the neck underneath",
+    "153_A": "Change long ponytail to short layered hair",
+    "153_B": "Change long ponytail to short layered hair",
+    "254_A": "Transform the braided pigtails into straight long hair",
+    "254_B": "Transform the braided pigtails into straight long hair",
+    "710_A": "Change angry expression to happy expression",
+    "710_B": "Change angry expression to happy expression",
+    "1061_A": "Transform conflict scene into hugging scene",
+    "1061_B": "Transform conflict scene into hugging scene",
 }
 
 STYLE_REQUIREMENTS = (
-    "Maintain the exact same minimalist black line art style on pure white background. "
-    "Convert all lines to uniform deep black color with consistent thickness. "
-    "Keep all unmodified parts with their original line structure, position, and curvature. "
-    "Ensure all lines are clear, smooth, and of the same color depth and weight. "
-    "Avoid any variations in line weight or opacity within the new image."
+    "Maintain black line art style on white background. "
+    "Keep unmodified parts with original line structure. "
+    "No color fills, no shading, only clean outlines."
 )
 
 NEGATIVE_PROMPT = (
     "blurry, low quality, distorted, deformed, watermark, text, "
-    "colored lines, grayscale variations, rough edges"
+    "colored lines, grayscale variations, rough edges, "
+    "solid color fill, filled shapes, black fill, color blocks, shading, gradient, "
+    "painting style, illustration style, anime coloring, cel shading"
 )
 
 
