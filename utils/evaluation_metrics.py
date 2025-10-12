@@ -7,6 +7,10 @@ import numpy as np
 import cv2
 from skimage.metrics import structural_similarity as ssim
 import lpips
+import torch
+import torch.nn.functional as F
+from transformers import CLIPModel, CLIPProcessor
+from PIL import Image
 
 
 class DiffusionEvaluator:
