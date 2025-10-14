@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from transformers import CLIPModel, CLIPProcessor
 from PIL import Image
+from utils.prompt_utils import STYLE_REQUIREMENTS
 
 
 class DiffusionEvaluator:
@@ -28,11 +29,10 @@ class DiffusionEvaluator:
         self.lpips_model = lpips.LPIPS(net='alex').to(device)
         
         # Weights configuration
+        # Only two metrics: Edit Compliance (60%) and Style Consistency (40%)
         self.weights = {
-            'edit_compliance': 0.50,
-            'style_consistency': 0.30,
-            'structural_plausibility': 0.10,
-            'aesthetic_quality': 0.10
+            'edit_compliance': 0.60,
+            'style_consistency': 0.40
         }
     
     def evaluate(self, img_before, img_after, text_source, text_target, edit_prompt):
@@ -76,21 +76,16 @@ class DiffusionEvaluator:
         
         # 2. Style Consistency
         clip_style = self._clip_style_similarity(img_after)
-        edge_sim = self._edge_similarity(img_before, img_after)
-        style_consistency = 0.33 * clip_style + 0.67 * edge_sim
+        # Removed edge similarity - it's not suitable for evaluating structural changes
+        # as high similarity could indicate either good preservation or insufficient editing
+        style_consistency = clip_style
         
-        # 3. Structural Plausibility
-        structural_score = self._lpips_score(img_before, img_after)
+        # Removed Structural Plausibility and Aesthetic Quality as they are not suitable for line art evaluation
         
-        # 4. Aesthetic Quality
-        aesthetic_score = self._aesthetic_score(img_after)
-        
-        # Total score
+        # Total score - only two metrics for line art evaluation
         total_score = (
             self.weights['edit_compliance'] * edit_compliance +
-            self.weights['style_consistency'] * style_consistency +
-            self.weights['structural_plausibility'] * structural_score +
-            self.weights['aesthetic_quality'] * aesthetic_score
+            self.weights['style_consistency'] * style_consistency
         )
         
         return {
@@ -99,9 +94,6 @@ class DiffusionEvaluator:
             'clip_score': float(clip_score),
             'style_consistency': float(style_consistency),
             'clip_style': float(clip_style),
-            'edge_similarity': float(edge_sim),
-            'structural_plausibility': float(structural_score),
-            'aesthetic_quality': float(aesthetic_score),
             'total_score': float(total_score)
         }
     
@@ -156,10 +148,9 @@ class DiffusionEvaluator:
         return (similarity + 1) / 2  # Normalize to [0, 1]
     
     def _clip_style_similarity(self, img_after):
-        """Compute CLIP style similarity (line art)"""
-        style_description = "black and white line art sketch"
+        """Compute CLIP style similarity using actual style requirements"""
         img_emb = self._get_clip_embeddings(images=[img_after])
-        style_emb = self._get_clip_embeddings(texts=[style_description])
+        style_emb = self._get_clip_embeddings(texts=[STYLE_REQUIREMENTS])
         similarity = F.cosine_similarity(img_emb, style_emb).item()
         return (similarity + 1) / 2  # Normalize to [0, 1]
     
